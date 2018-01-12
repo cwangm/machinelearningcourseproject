@@ -1,0 +1,97 @@
+---
+title: "Machine Learning Course Project"
+author: "Chenyang Wang"
+date: "1/10/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, error = FALSE)
+library(ggplot2)
+library(gridExtra)
+library(data.table)
+library(caret)
+library(randomForest)
+```
+
+#Executive summary
+Personal fitness devices are mean to quantify self movement and is an increasingly popular source of data for various machine learning methodologies. In this study, the data are acquired from fitness devices worn by six enthusiasts who made the measurements about themselves regularly. These data are measured via accelerometers on the belt, forearm, arma nd dumbells of these six participants while they performed barbell lifets correctly and incorrectly. The goal of this study is to generate a predictive model based on machine learning methodology to predic the manner in which they did the exercise.
+
+In this study, we chose to use the random forests with cross-validation to predict the `classe` variable in the training dataset. The training dataset was split with 70% of the data forming an effective training set, and the remaining 30% of the data forming a validation dataset. Out-of-sample error was calculated by applying the random forest model on the validation dataset, and it was calculated to be 0.002 using our prediction model. The final random forests model was further applied to a test dataset with unknown `classe` variable as the final part of this project. 
+
+#Data processing
+##Data import
+The training and testing datasets are downloaded directly via links on the project website. Both datasets are provided as csv files.
+```{r loading data, cache = TRUE}
+directory_path <- "/Users/z/Coursera_courses/Data_Science_Spec/projects_and_books/8_Practical_Machine_Learning/course_project"
+setwd(directory_path)
+fileUrl1 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+fileUrl2 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(fileUrl1, destfile = "pml_training.csv", method = "curl")
+download.file(fileUrl2, destfile = "pml_testing.csv", method = "curl")
+train <- read.csv("pml_training.csv", header = TRUE, sep = ",")
+test <- read.csv("pml_testing.csv", header = TRUE, sep = ",")
+train <- data.table(train)
+test <- data.table(test)
+```
+
+##Data summary
+The "train" dataset contains 19622 observations of 160 variables, while the "test" dataset contains 20 observations of the same set of variables. Variable `classe` is the outcome varaible in the "train" dataset, and it is a factor with 5 levels. It was noted that a signficant number of columns contain mostly "NA" (~98%), because these variables have missing values in most obserations, they were not amenable to imputation and thus should be removed from the model. There are also a number of variables that have been imported as factors, but they are in fact numeric types. In addition, the first 7 variables appear to be mostly index, names, and times, which would not be contributory to the training of the dataset, and thus should be removed as well.
+```{r data summary}
+str(train[, 1:15])
+```
+
+##Data preparation
+The first 7 columns of the "train" and "test" datasets are removed since they are unlikely to contribute to the final predictive model. In addition, the columns with mostly NAs were also removed from the "train" and "test" datasets. At last, all columns of the factor type (except for `classe` and `problem id`) are casted as numeric type to ensure correct modeling.
+```{r data processing, warning = FALSE}
+train <- train[, -c(1:7)]    #remove first 7 rows because the variables are useless
+test <- test[, -c(1:7)]
+cols <- unlist(attributes(which(sapply(train, is.factor))))    #vector of column names containing factors
+cols <- cols[-length(cols)]   #remove the last factor, classe, from the list to be processed
+train <- train[, (cols) := lapply(.SD, as.character), .SDcols = cols]
+train <- train[, (cols) := lapply(.SD, as.numeric), .SDcols = cols]
+train <- train[, colnames(train)[colSums(is.na(train)) > 0] := NULL]  #remove all columns containing NA
+test <- test[, (cols) := lapply(.SD, as.character), .SDcols = cols]
+test <- test[, (cols) := lapply(.SD, as.numeric), .SDcols = cols]
+test <- test[, colnames(test)[colSums(is.na(test)) > 0] := NULL]  #remove all columns containing NA
+```
+The processed "train" dataset contains 19622 observations with 53 variables, with the last column being `classe`.
+```{r final processed data}
+dim(train)
+```
+
+#Predictive modeling via machine learning
+Random forests was the chosen method for gerenating a model to predict for `classe`.
+
+##Data splitting
+In order to carry out cross validation and obtain out-of-sample error, the original train dataset was split into a training set and a validation set based on `classe`, with 70% of the observation going into training and 30% going into validation. 
+```{r data split}
+inTrain <- createDataPartition(y = train$classe, p = 0.7, list = FALSE)
+train_train <- train[inTrain]
+train_valid <- train[-inTrain]
+```
+
+##Random forests
+We decided to use the random forests method for our predictive algorithm because the fact that the predictors in our dataset are mostly numeric variables. In addition, random forests method was also chosen because of its accuracy.
+```{r data random forest, cache = TRUE}
+modrf <- randomForest(y = train_train$classe, x = train_train[, -53], ntree = 3000)
+summary(modrf)
+```
+
+#Cross-validation
+We carried cross-validation with the validation dataset created when the original "train" dataset was split. The predictive model was applied to the validation dataset, and the out-of-sample error was calculated as 1-accuracy.
+```{r cross}
+pred_cross <- predict(modrf, train_valid)
+cf <- confusionMatrix(train_valid$classe, pred_cross)
+print(cf)
+cf$overall[1]
+```
+The results of the cross-validation showed an accuracy of 0.998, which means the out-of-sample error is 0.002, which is acceptable for the purpose of making predicitons in this study. In addition, the sensitivity and specificity are fairly high for all five levels of the `classe` variable.
+
+#Predict on test dataset
+The above model generated via random forests was applied to the "test" dataset of 20 observations.
+```{r predict}
+pred_test <- predict(modrf, test[, -53])
+pred_test
+```
+The predicted activity type for the test dataset is shown above, with the letters indicating the corresponding levels in the `classe` variable in the training dataset.
